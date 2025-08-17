@@ -22,7 +22,7 @@ API_TOKEN = os.environ["Token"]          # токен бота (переменн
 CHANNEL_URL = os.environ.get("URL", "")  # ссылка на канал
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))
 ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))
-
+keep_alive()
 logging.basicConfig(level=logging.INFO)
 print("🤖 Бот запущен и готов к работе!")
 
@@ -198,3 +198,4 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
     app.run_polling()
+
