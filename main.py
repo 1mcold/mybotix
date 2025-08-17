@@ -193,11 +193,7 @@ keep_alive()
 
 # ========= ЗАПУСК =========
 if __name__ == "__main__":
-    try:
-        keep_alive()
-    except Exception:
-        keep_alive()
-
+    keep_alive()  # запускаем Flask для "пинга" (на Replit/Render)
     app = ApplicationBuilder().token(API_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ping", ping))
