@@ -20,19 +20,19 @@ from background import keep_alive  # если используешь Replit keep
 # ========= НАСТРОЙКИ =========
 API_TOKEN = os.environ["Token"]          # токен бота (переменная окружения)
 CHANNEL_URL = os.environ.get("URL", "")  # ссылка на канал
-ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))  # ID админа для логов
-ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))  # ID админа для логов
+ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))
+ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))
 
 logging.basicConfig(level=logging.INFO)
 print("🤖 Бот запущен и готов к работе!")
 
-# ========= ПАМЯТЬ/ХРАНИЛИЩЕ =========
-user_data: dict[int, dict] = {}           # временное состояние анкеты {chat_id: {"step": int, "answers": dict}}
-user_data_completed: set[int] = set()     # кто уже заполнил анкету
-user_blocked: dict[int, dict] = {}        # {chat_id: {"attempts": int, "last_time": int}}
+# ========= ПАМЯТЬ =========
+user_data: dict[int, dict] = {}
+user_data_completed: set[int] = set()
+user_blocked: dict[int, dict] = {}
 
-BLOCK_DURATION = 24 * 60 * 60  # 24 часа в секундах
-MAX_ATTEMPTS = 6               # после 6-й попытки — блок на 24ч
+BLOCK_DURATION = 24 * 60 * 60
+MAX_ATTEMPTS = 6
 
 # ========= ВОПРОСЫ =========
 questions = [
@@ -121,14 +121,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id, "👋 Добро пожаловать!\nДля начала заполните анкету.")
     await ask_question(chat_id, context)
 
-# ========= СЕКРЕТНАЯ КОМАНДА =========
+
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    # Разрешаем только админу
     if chat_id != ADMIN_CHAT_ID_2:
-        return  # просто игнорируем остальных
-
+        return
     await context.bot.send_message(chat_id, "🏓 Pong! Бот онлайн и работает.")
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_chat or not update.message:
@@ -169,7 +168,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await context.bot.send_message(chat_id, "🎉 Добро пожаловать!", reply_markup=keyboard)
 
-        # ===== ОТПРАВКА АДМИНУ =====
         if ADMIN_CHAT_ID != 0:
             user = update.effective_user
             profile_link = f"<a href='tg://user?id={chat_id}'>Профиль</a>"
@@ -188,14 +186,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_data_completed.add(chat_id)
         del user_data[chat_id]
-        
-keep_alive()
+
 
 # ========= ЗАПУСК =========
 if __name__ == "__main__":
-    keep_alive()  # запускаем Flask для "пинга" (на Replit/Render)
+    keep_alive()  # для Replit
     app = ApplicationBuilder().token(API_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
     app.run_polling()
