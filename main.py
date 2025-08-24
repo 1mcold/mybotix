@@ -11,21 +11,25 @@ from telegram import (
 )
 from telegram.ext import (
     ApplicationBuilder,
+    Application,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
+    PreCheckoutQueryHandler,
     ContextTypes,
-    filters,
-    PreCheckoutQueryHandler
+    filters
 )
 from background import keep_alive  # если используешь Replit keep-alive
 
 # ========= НАСТРОЙКИ =========
-API_TOKEN = os.environ.get("Token", "")          # токен бота (переменная окружения)
-CHANNEL_URL = os.environ.get("URL", "")          # ссылка на канал
+API_TOKEN = os.environ["Token"]          # токен бота (переменная окружения)
+CHANNEL_URL = os.environ.get("URL", "")  # ссылка на канал
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))  # ID админа для логов
-ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))  # ID второго админа
-PAYMENT_PROVIDER_TOKEN = ""  # токен платежного провайдера
+ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))  # ID админа для логов
+
+# Для платежей
+TOKEN = API_TOKEN
+PAYMENT_PROVIDER_TOKEN = ""  # вставьте свой токен провайдера
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -137,7 +141,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text or ""
 
-    # ==== Проверка на кастомный донат ====
+    # Обработка кастомной суммы для доната
     if context.user_data.get("waiting_for_custom"):
         try:
             amount = int(text)
@@ -147,7 +151,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Введите число!")
         return
 
-    # ==== Обработка анкеты ====
     if chat_id not in user_data:
         return
 
@@ -181,9 +184,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await context.bot.send_message(chat_id, "🎉 Добро пожаловать!", reply_markup=keyboard)
 
-        # ===== ОТПРАВКА АДМИНУ =====
+        # Отправка админу
         if ADMIN_CHAT_ID != 0:
-            user = update.effective_user
             profile_link = f"<a href='tg://user?id={chat_id}'>Профиль</a>"
             log_text = (
                 f"📩 Новая анкета!\n\n"
@@ -201,7 +203,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data_completed.add(chat_id)
         del user_data[chat_id]
 
-# ========= ХЭНДЛЕРЫ ДОНАТОВ =========
+# ========= ДОНАТЫ =========
 async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
@@ -234,9 +236,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
     elif query.data.startswith("charity_amount_"):
         amount = int(query.data.split("_")[-1])
         await send_invoice(query, context, "Благотворительный донат", amount)
+
     elif query.data == "charity_custom":
         await query.edit_message_text(
             "💰 Введите вашу сумму в звёздах:",
@@ -244,6 +248,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="donate_charity")]])
         )
         context.user_data["waiting_for_custom"] = True
+
     elif query.data == "donate_privileges":
         keyboard = [
             [InlineKeyboardButton("🛡 Страховка от мута — 10 ⭐", callback_data="privilege_mute_protect")],
@@ -255,10 +260,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
     elif query.data == "privilege_mute_protect":
         await send_invoice(query, context, "Страховка от мута", 10)
+
     elif query.data == "privilege_unmute":
         await send_invoice(query, context, "Размут", 15)
+
     elif query.data == "main_menu":
         await query.edit_message_text(
             "🌟 <b>Выберите тип доната</b>",
@@ -272,7 +280,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_invoice(target, context, title, amount):
     chat_id = target.from_user.id if hasattr(target, "from_user") else target.message.chat_id
     description = f"Оплата: {title}"
-    prices = [LabeledPrice(label=title, amount=amount * 1)]  # 1⭐ = 100 единиц
+    prices = [LabeledPrice(label=title, amount=amount * 1)]  # 1⭐ = 1 единица
+
     await context.bot.send_invoice(
         chat_id,
         title=title,
@@ -296,17 +305,21 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
 
 # ========= ЗАПУСК =========
 keep_alive()
-app = ApplicationBuilder().token(API_TOKEN).build()
 
-# ===== ХЭНДЛЕРЫ АНКЕТЫ =====
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ping", ping))
-app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+if __name__ == "__main__":
+    try:
+        keep_alive()
+    except Exception:
+        keep_alive()
 
-# ===== ХЭНДЛЕРЫ ДОНАТОВ =====
-app.add_handler(CommandHandler("donate", donate))
-app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(PreCheckoutQueryHandler(precheckout_handler))
-app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
-
-app.run_polling()
+    app = ApplicationBuilder().token(API_TOKEN).build()
+    # Анкета
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    # Донаты
+    app.add_handler(CommandHandler("donate", donate))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(PreCheckoutQueryHandler(precheckout_handler))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
+    app.run_polling()
