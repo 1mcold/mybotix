@@ -19,17 +19,13 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-# from background import keep_alive  # если используешь Replit keep-alive
+from background import keep_alive  # если используешь Replit keep-alive
 
 # ========= НАСТРОЙКИ =========
 API_TOKEN = os.environ["Token"]          # токен бота (переменная окружения)
 CHANNEL_URL = os.environ.get("URL", "")  # ссылка на канал
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))  # ID админа для логов
 ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))  # ID админа для логов
-
-# Для платежей
-TOKEN = os.environ["Token"]
-PAYMENT_PROVIDER_TOKEN = ""  # вставьте свой токен провайдера
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -287,7 +283,7 @@ async def send_invoice(target, context, title, amount):
         title=title,
         description=description,
         payload=f"donation_{title}_{amount}",
-        provider_token=PAYMENT_PROVIDER_TOKEN,
+        provider_token="",
         currency="XTR",
         prices=prices,
         start_parameter="donate"
@@ -300,17 +296,17 @@ async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def successful_payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payment = update.message.successful_payment
     await update.message.reply_text(
-        f"✅ Спасибо за оплату {payment.total_amount // 100} ⭐ ({payment.invoice_payload})!"
+        f"✅ Спасибо за оплату {payment.total_amount // 1} ⭐ ({payment.invoice_payload})!"
     )
 
 # ========= ЗАПУСК =========
-# keep_alive()
+keep_alive()
 
 if __name__ == "__main__":
-    # try:
-    #     keep_alive()
-    # except Exception:
-    #     keep_alive()
+    try:
+        keep_alive()
+    except Exception:
+        keep_alive()
 
     app = ApplicationBuilder().token(API_TOKEN).build()
     # Анкета
@@ -323,4 +319,5 @@ if __name__ == "__main__":
     app.add_handler(PreCheckoutQueryHandler(precheckout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     app.run_polling()
+
 
