@@ -20,7 +20,7 @@ from background import keep_alive  # если используешь Replit keep
 
 # ========= НАСТРОЙКИ =========
 API_TOKEN = os.environ["Token"]                # токен бота
-PAYMENT_PROVIDER_TOKEN = os.environ["PAYMENT"] # токен для Telegram Stars
+PAYMENT_PROVIDER_TOKEN = "" # токен для Telegram Stars
 CHANNEL_URL = os.environ.get("URL", "")
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))
 ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))
@@ -207,3 +207,4 @@ def main():
 if __name__ == "__main__":
     keep_alive()
     main()
+
