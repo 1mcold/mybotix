@@ -20,13 +20,13 @@ from telegram.ext import (
     filters
 )
 
-# === NEW: Get Render's environment variables ===
-# Render provides the port and URL through environment variables
+# Удаляем keep_alive, он тут не нужен
+# from background import keep_alive
+
+# ========= НАСТРОЙКИ ДЛЯ RENDER =========
+# Render сам предоставляет эти переменные окружения
 PORT = int(os.environ.get("PORT", 5000))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-
-# === Remove keep_alive imports ===
-# from background import keep_alive
 
 # ========= НАСТРОЙКИ =========
 API_TOKEN = os.environ["Token"]  # токен бота (переменная окружения)
@@ -35,6 +35,7 @@ ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))  # ID админа для �
 ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))  # ID админа для логов
 
 # Для платежей
+# TOKEN = os.environ["Token"] - Эта строка дублирует API_TOKEN, можно убрать
 PAYMENT_PROVIDER_TOKEN = ""  # вставьте свой токен провайдера
 
 logging.basicConfig(level=logging.INFO)
@@ -42,12 +43,12 @@ logger = logging.getLogger(__name__)
 print("🤖 Бот запущен и готов к работе!")
 
 # ========= ПАМЯТЬ/ХРАНИЛИЩЕ =========
-user_data: dict[int, dict] = {}           # временное состояние анкеты {chat_id: {"step": int, "answers": dict}}
-user_data_completed: set[int] = set()     # кто уже заполнил анкету
-user_blocked: dict[int, dict] = {}        # {chat_id: {"attempts": int, "last_time": int}}
+user_data: dict[int, dict] = {}
+user_data_completed: set[int] = set()
+user_blocked: dict[int, dict] = {}
 
-BLOCK_DURATION = 24 * 60 * 60  # 24 часа в секундах
-MAX_ATTEMPTS = 6             # после 6-й попытки — блок на 24ч
+BLOCK_DURATION = 24 * 60 * 60
+MAX_ATTEMPTS = 6
 
 # ========= ВОПРОСЫ =========
 questions = [
@@ -310,9 +311,16 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     )
 
 # ========= ЗАПУСК =========
-# === Removed keep_alive() calls ===
+# Убираем keep_alive
+# keep_alive()
 
 if __name__ == "__main__":
+    # Убираем try/except с keep_alive
+    # try:
+    #     keep_alive()
+    # except Exception:
+    #     keep_alive()
+
     app = ApplicationBuilder().token(API_TOKEN).build()
     # Анкета
     app.add_handler(CommandHandler("start", start))
@@ -324,9 +332,8 @@ if __name__ == "__main__":
     app.add_handler(PreCheckoutQueryHandler(precheckout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
 
-    # === NEW: Webhook configuration for Render ===
-    # Set the webhook to the URL provided by Render and run the bot
-    print(f"Setting webhook URL to: {WEBHOOK_URL}")
+    # Запускаем в режиме вебхука для Render
+    print("Запускаем бота в режиме вебхука...")
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
