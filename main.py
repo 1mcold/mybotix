@@ -190,7 +190,7 @@ async def refund(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⭐ Сумма: {tx['amount']}",
         parse_mode="HTML"
     )
-keep_alive()
+
 # ========= ЗАПУСК =========
 def main():
     app = ApplicationBuilder().token(API_TOKEN).build()
@@ -207,4 +207,5 @@ def main():
 if __name__ == "__main__":
     keep_alive()
     main()
+
 
