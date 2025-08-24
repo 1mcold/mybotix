@@ -15,7 +15,7 @@ def run():
   app.run(host='0.0.0.0', port=5000)
 
 def keep_alive():
-    if os.environ.get("RENDER"):  # будет работать только на Render
-        t = threading.Thread(target=run)
-        t.start()
+  t = threading.Thread(target=run)
+  t.start()
+
 
