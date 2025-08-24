@@ -1,53 +1,92 @@
 import os
 import logging
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.utils import executor
+import time
+from telegram import (
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    Update,
+    LabeledPrice
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    PreCheckoutQueryHandler,
+    ContextTypes,
+    filters
+)
+
+# === NEW: Get Render's environment variables ===
+# Render provides the port and URL through environment variables
+PORT = int(os.environ.get("PORT", 5000))
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
+# === Remove keep_alive imports ===
+# from background import keep_alive
+
+# ========= НАСТРОЙКИ =========
+API_TOKEN = os.environ["Token"]  # токен бота (переменная окружения)
+CHANNEL_URL = os.environ.get("URL", "")  # ссылка на канал
+ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))  # ID админа для логов
+ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))  # ID админа для логов
+
+# Для платежей
+PAYMENT_PROVIDER_TOKEN = ""  # вставьте свой токен провайдера
 
 logging.basicConfig(level=logging.INFO)
-
-TOKEN = os.environ["Token"]
-PAYMENT_PROVIDER_TOKEN = ""  # вставьте свой токен провайдера
-ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))
-CHANNEL_URL = os.environ.get("URL", "")
-
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
+logger = logging.getLogger(__name__)
+print("🤖 Бот запущен и готов к работе!")
 
 # ========= ПАМЯТЬ/ХРАНИЛИЩЕ =========
-user_data: dict[int, dict] = {}
-user_data_completed: set[int] = set()
+user_data: dict[int, dict] = {}           # временное состояние анкеты {chat_id: {"step": int, "answers": dict}}
+user_data_completed: set[int] = set()     # кто уже заполнил анкету
+user_blocked: dict[int, dict] = {}        # {chat_id: {"attempts": int, "last_time": int}}
 
-BLOCK_DURATION = 24 * 60 * 60
-MAX_ATTEMPTS = 6
-user_blocked: dict[int, dict] = {}
+BLOCK_DURATION = 24 * 60 * 60  # 24 часа в секундах
+MAX_ATTEMPTS = 6             # после 6-й попытки — блок на 24ч
 
+# ========= ВОПРОСЫ =========
 questions = [
-    {"key": "name", "question": "📝 Имя:"},
-    {"key": "age", "question": "🎂 Возраст:"},
+    {"key": "name",  "question": "📝 Имя:"},
+    {"key": "age",   "question": "🎂 Возраст:"},
     {"key": "skill", "question": "🎨 Скилл в рисовании (не обязательно):", "button": "Не хочу указывать"},
 ]
 
 # ========= УТИЛИТЫ =========
 def validate_input(key: str, text: str) -> bool:
-    if key == "name" and len(text) > 30: return False
-    if key == "skill" and len(text) > 70: return False
-    if key == "age" and not text.isdigit(): return False
+    if key == "name" and len(text) > 30:
+        return False
+    if key == "skill" and len(text) > 70:
+        return False
+    if key == "age" and not text.isdigit():
+        return False
     return True
 
 def is_block_active(chat_id: int, now: int) -> bool:
     b = user_blocked.get(chat_id)
-    return b and b.get("last_time", 0) and (now - b["last_time"]) < BLOCK_DURATION
+    if not b:
+        return False
+    if b.get("last_time", 0) == 0:
+        return False
+    return (now - b["last_time"]) < BLOCK_DURATION
 
-def reset_block_if_expired(chat_id: int, now: int):
+def reset_block_if_expired(chat_id: int, now: int) -> None:
     b = user_blocked.get(chat_id)
-    if b and b.get("last_time", 0) and (now - b["last_time"]) >= BLOCK_DURATION:
+    if not b:
+        return
+    if b.get("last_time", 0) and (now - b["last_time"]) >= BLOCK_DURATION:
         user_blocked[chat_id] = {"attempts": 0, "last_time": 0}
 
 def note_attempt_and_maybe_block(chat_id: int, now: int) -> tuple[int, bool]:
-    b = user_blocked.setdefault(chat_id, {"attempts": 0, "last_time": 0})
+    b = user_blocked.get(chat_id)
+    if not b:
+        b = {"attempts": 0, "last_time": 0}
+        user_blocked[chat_id] = b
+
     b["attempts"] += 1
     blocked_now = False
     if b["attempts"] >= MAX_ATTEMPTS:
@@ -56,21 +95,28 @@ def note_attempt_and_maybe_block(chat_id: int, now: int) -> tuple[int, bool]:
         logging.info(f"Пользователь {chat_id} заблокирован на 1 день за спам.")
     return b["attempts"], blocked_now
 
-async def ask_question(chat_id: int):
+async def ask_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     step = user_data[chat_id]["step"]
-    q = questions[step]
-    progress_text = f"Вопрос {step+1}/{len(questions)}\n{q['question']}"
-    if q.get("button"):
-        keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(q["button"])]], resize_keyboard=True, one_time_keyboard=True)
-        await bot.send_message(chat_id, progress_text, reply_markup=keyboard)
-    else:
-        await bot.send_message(chat_id, progress_text, reply_markup=ReplyKeyboardRemove())
+    current_question = questions[step]
+    progress_text = f"Вопрос {step + 1}/{len(questions)}\n"
 
-# ========= АНКЕТА =========
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    chat_id = message.chat.id
+    if current_question.get("button") and current_question["key"] == "skill":
+        keyboard = ReplyKeyboardMarkup(
+            [[current_question["button"]]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await context.bot.send_message(chat_id, progress_text + current_question["question"], reply_markup=keyboard)
+    else:
+        await context.bot.send_message(chat_id, progress_text + current_question["question"])
+
+# ========= ХЭНДЛЕРЫ АНКЕТЫ =========
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
     now = int(time.time())
+
     if is_block_active(chat_id, now):
         return
     reset_block_if_expired(chat_id, now)
@@ -82,70 +128,107 @@ async def cmd_start(message: types.Message):
             msg = "⚠ Вы уже заполнили анкету. Новая анкета невозможна."
             if left > 0:
                 msg += f"\n(Предупреждение {attempts}/{MAX_ATTEMPTS}. После {MAX_ATTEMPTS} попыток будет игнор на 24 часа.)"
-            await bot.send_message(chat_id, msg)
+            await context.bot.send_message(chat_id, msg)
         return
 
     user_data[chat_id] = {"step": 0, "answers": {}}
-    await bot.send_message(chat_id, "👋 Добро пожаловать!\nДля начала заполните анкету.")
-    await ask_question(chat_id)
+    await context.bot.send_message(chat_id, "👋 Добро пожаловать!\nДля начала заполните анкету.")
+    await ask_question(chat_id, context)
 
-@dp.message(F.text)
-async def handle_answers(message: types.Message):
-    chat_id = message.chat.id
-    text = message.text
-    if chat_id not in user_data: return
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id != ADMIN_CHAT_ID_2:
+        return
+    await context.bot.send_message(chat_id, "🏓 Pong! Бот онлайн и работает.")
 
-    step = user_data[chat_id]["step"]
-    q = questions[step]
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_chat or not update.message:
+        return
+    chat_id = update.effective_chat.id
+    text = update.message.text or ""
 
-    if q.get("button") and text == q["button"]:
-        user_data[chat_id]["answers"][q["key"]] = "не указано"
-        await bot.send_message(chat_id, "Вы пропустили этот вопрос", reply_markup=ReplyKeyboardRemove())
-    elif validate_input(q["key"], text):
-        user_data[chat_id]["answers"][q["key"]] = text
-    else:
-        await bot.send_message(chat_id, "⚠ Некорректный ввод. Попробуйте снова:")
+    # Обработка кастомной суммы для доната
+    if context.user_data.get("waiting_for_custom"):
+        try:
+            amount = int(text)
+            context.user_data["waiting_for_custom"] = False
+            await send_invoice(update, context, "Благотворительный донат (кастом)", amount)
+        except ValueError:
+            await update.message.reply_text("⚠️ Введите число!")
         return
 
-    if step+1 < len(questions):
-        user_data[chat_id]["step"] += 1
-        await ask_question(chat_id)
+    if chat_id not in user_data:
+        return
+
+    step = user_data[chat_id]["step"]
+    current_question = questions[step]
+
+    if current_question.get("button") and text == current_question["button"]:
+        user_data[chat_id]["answers"][current_question["key"]] = "не указано"
+        await context.bot.send_message(chat_id, "Вы пропустили этот вопрос", reply_markup=ReplyKeyboardRemove())
     else:
-        ans = user_data[chat_id]["answers"]
-        summary = f"✅ Спасибо за заполнение анкеты!\n\nИмя: {ans['name']}\nВозраст: {ans['age']}\nСкилл: {ans['skill']}"
-        await bot.send_message(chat_id, summary)
+        if not validate_input(current_question["key"], text):
+            await context.bot.send_message(chat_id, "⚠ Некорректный ввод. Попробуйте снова:")
+            return
+        user_data[chat_id]["answers"][current_question["key"]] = text
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton("Перейти в канал", url=CHANNEL_URL)]])
-        await bot.send_message(chat_id, "🎉 Добро пожаловать!", reply_markup=keyboard)
+    if step + 1 < len(questions):
+        user_data[chat_id]["step"] += 1
+        await ask_question(chat_id, context)
+    else:
+        answers = user_data[chat_id]["answers"]
+        summary = (
+            "✅ Спасибо за заполнение анкеты!\n\n"
+            f"Имя: {answers['name']}\n"
+            f"Возраст: {answers['age']}\n"
+            f"Скилл в рисовании: {answers['skill']}"
+        )
+        await context.bot.send_message(chat_id, summary)
 
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Перейти в канал", url=CHANNEL_URL or "https://t.me/")]]
+        )
+        await context.bot.send_message(chat_id, "🎉 Добро пожаловать!", reply_markup=keyboard)
+
+        # Отправка админу
         if ADMIN_CHAT_ID != 0:
             profile_link = f"<a href='tg://user?id={chat_id}'>Профиль</a>"
-            log_text = f"📩 Новая анкета!\n👤 {profile_link}\n🆔 {chat_id}\nИмя: {ans['name']}\nВозраст: {ans['age']}\nСкилл: {ans['skill']}"
-            await bot.send_message(ADMIN_CHAT_ID, log_text, parse_mode="HTML")
+            log_text = (
+                f"📩 Новая анкета!\n\n"
+                f"👤 {profile_link}\n"
+                f"🆔 ChatID: <code>{chat_id}</code>\n\n"
+                f"Имя: {answers['name']}\n"
+                f"Возраст: {answers['age']}\n"
+                f"Скилл: {answers['skill']}"
+            )
+            try:
+                await context.bot.send_message(ADMIN_CHAT_ID, log_text, parse_mode="HTML")
+            except Exception as e:
+                logging.error(f"Не удалось отправить админу: {e}")
 
         user_data_completed.add(chat_id)
         del user_data[chat_id]
 
-@dp.message(Command("ping"))
-async def cmd_ping(message: types.Message):
-    chat_id = message.chat.id
-    if False:  # ADMIN_CHAT_ID_2 всегда пустой
-        await bot.send_message(chat_id, "🏓 Pong! Бот онлайн и работает.")
-
 # ========= ДОНАТЫ =========
-@dp.message(Command("donate"))
-async def donate(message: types.Message):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("✨ Благотворительный", callback_data="donate_charity"),
-         InlineKeyboardButton("💎 Привилегии", callback_data="donate_privileges")]
-    ])
-    await message.answer("🌟 Выберите тип доната:", reply_markup=keyboard)
+async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [
+            InlineKeyboardButton("✨ Благотворительный", callback_data="donate_charity"),
+            InlineKeyboardButton("💎 Привилегии", callback_data="donate_privileges")
+        ]
+    ]
+    await update.message.reply_text(
+        "🌟 <b>Выберите тип доната</b> ",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-@dp.callback_query()
-async def donate_cb(query: types.CallbackQuery):
-    data = query.data
-    if data == "donate_charity":
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "donate_charity":
+        keyboard = [
             [InlineKeyboardButton("10 ⭐", callback_data="charity_amount_10"),
              InlineKeyboardButton("50 ⭐", callback_data="charity_amount_50")],
             [InlineKeyboardButton("100 ⭐", callback_data="charity_amount_100"),
@@ -153,21 +236,100 @@ async def donate_cb(query: types.CallbackQuery):
             [InlineKeyboardButton("1000 ⭐", callback_data="charity_amount_1000")],
             [InlineKeyboardButton("💰 Другая сумма", callback_data="charity_custom")],
             [InlineKeyboardButton("🔙 Назад", callback_data="main_menu")]
-        ])
-        await query.message.edit_text("✨ Выберите сумму:", reply_markup=keyboard)
+        ]
+        await query.edit_message_text(
+            "✨ <b>Выберите сумму доната</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-    elif data.startswith("charity_amount_"):
-        amount = int(data.split("_")[-1])
-        await query.message.answer(f"Вы выбрали {amount} ⭐ (оплата через Telegram не реализована)")
-    elif data == "donate_privileges":
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    elif query.data.startswith("charity_amount_"):
+        amount = int(query.data.split("_")[-1])
+        await send_invoice(query, context, "Благотворительный донат", amount)
+
+    elif query.data == "charity_custom":
+        await query.edit_message_text(
+            "💰 Введите вашу сумму в звёздах:",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="donate_charity")]])
+        )
+        context.user_data["waiting_for_custom"] = True
+
+    elif query.data == "donate_privileges":
+        keyboard = [
             [InlineKeyboardButton("🛡 Страховка от мута — 10 ⭐", callback_data="privilege_mute_protect")],
             [InlineKeyboardButton("🔓 Размут — 15 ⭐", callback_data="privilege_unmute")],
             [InlineKeyboardButton("🔙 Назад", callback_data="main_menu")]
-        ])
-        await query.message.edit_text("💎 Привилегии", reply_markup=keyboard)
-    await query.answer()
+        ]
+        await query.edit_message_text(
+            "💎 <b>Привилегии</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-# ========= RUN =========
+    elif query.data == "privilege_mute_protect":
+        await send_invoice(query, context, "Страховка от мута", 10)
+
+    elif query.data == "privilege_unmute":
+        await send_invoice(query, context, "Размут", 15)
+
+    elif query.data == "main_menu":
+        await query.edit_message_text(
+            "🌟 <b>Выберите тип доната</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✨ Благотворительный", callback_data="donate_charity"),
+                 InlineKeyboardButton("💎 Привилегии", callback_data="donate_privileges")]
+            ])
+        )
+
+async def send_invoice(target, context, title, amount):
+    chat_id = target.from_user.id if hasattr(target, "from_user") else target.message.chat_id
+    description = f"Оплата: {title}"
+    prices = [LabeledPrice(label=title, amount=amount * 1)]  # 1⭐ = 1 единица
+
+    await context.bot.send_invoice(
+        chat_id,
+        title=title,
+        description=description,
+        payload=f"donation_{title}_{amount}",
+        provider_token=PAYMENT_PROVIDER_TOKEN,
+        currency="XTR",
+        prices=prices,
+        start_parameter="donate"
+    )
+
+async def precheckout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.pre_checkout_query
+    await query.answer(ok=True)
+
+async def successful_payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    payment = update.message.successful_payment
+    await update.message.reply_text(
+        f"✅ Спасибо за оплату {payment.total_amount // 100} ⭐ ({payment.invoice_payload})!"
+    )
+
+# ========= ЗАПУСК =========
+# === Removed keep_alive() calls ===
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    app = ApplicationBuilder().token(API_TOKEN).build()
+    # Анкета
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    # Донаты
+    app.add_handler(CommandHandler("donate", donate))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(PreCheckoutQueryHandler(precheckout_handler))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
+
+    # === NEW: Webhook configuration for Render ===
+    # Set the webhook to the URL provided by Render and run the bot
+    print(f"Setting webhook URL to: {WEBHOOK_URL}")
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=API_TOKEN,
+        webhook_url=WEBHOOK_URL + API_TOKEN,
+    )
