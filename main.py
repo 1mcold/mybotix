@@ -25,7 +25,7 @@ API_TOKEN = os.environ.get("Token", "")          # токен бота (пере
 CHANNEL_URL = os.environ.get("URL", "")          # ссылка на канал
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_ID", "0"))  # ID админа для логов
 ADMIN_CHAT_ID_2 = int(os.environ.get("ADMIN_ID_2", "0"))  # ID второго админа
-PAYMENT_PROVIDER_TOKEN = os.environ.get("PAYMENT_TOKEN", "")  # токен платежного провайдера
+PAYMENT_PROVIDER_TOKEN = ""  # токен платежного провайдера
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -272,7 +272,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_invoice(target, context, title, amount):
     chat_id = target.from_user.id if hasattr(target, "from_user") else target.message.chat_id
     description = f"Оплата: {title}"
-    prices = [LabeledPrice(label=title, amount=amount * 100)]  # 1⭐ = 100 единиц
+    prices = [LabeledPrice(label=title, amount=amount * 1)]  # 1⭐ = 100 единиц
     await context.bot.send_invoice(
         chat_id,
         title=title,
