@@ -19,7 +19,7 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-from background import keep_alive  # если используешь Replit keep-alive
+# from background import keep_alive  # если используешь Replit keep-alive
 
 # ========= НАСТРОЙКИ =========
 API_TOKEN = os.environ["Token"]          # токен бота (переменная окружения)
@@ -304,13 +304,13 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     )
 
 # ========= ЗАПУСК =========
-keep_alive()
+# keep_alive()
 
 if __name__ == "__main__":
-    try:
-        keep_alive()
-    except Exception:
-        keep_alive()
+    # try:
+    #     keep_alive()
+    # except Exception:
+    #     keep_alive()
 
     app = ApplicationBuilder().token(API_TOKEN).build()
     # Анкета
@@ -323,3 +323,4 @@ if __name__ == "__main__":
     app.add_handler(PreCheckoutQueryHandler(precheckout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     app.run_polling()
+
